@@ -1,0 +1,579 @@
+#include "zk_client.h"
+
+volatile int Watcher::s_id = 0;
+typedef s_vector urls;
+
+Watcher::Watcher(const string& path)
+	:m_cli(NULL), m_path(path), m_event_mask(0),
+	m_check_exists(false) {
+	__sync_add_and_fetch(&s_id, 1);
+	m_id = s_id;
+}
+
+Watcher::~Watcher() {
+	delFromClient();
+}
+
+int Watcher::delFromClient() {
+	if (m_cli) {
+		m_cli->delWatcher(this);
+		m_cli = NULL;
+	}
+
+	return 0;
+}
+
+int Watcher::setClient(ZkClient* c) {
+	m_cli = c;
+	return 0;
+}
+
+int Watcher::checkExists() {
+	if (!m_cli) {
+		return 0;
+	}
+
+	if (m_check_exists) {
+		return 0;
+	}
+
+	m_check_exists = true;
+
+	return m_cli->watchCreate(this);
+
+}
+
+int Watcher::addToClient(ZkClient* cli) {
+	cli->addWatcher(this);
+	setClient(cli);
+
+	return 0;
+}
+
+
+int Watcher::addWatch(int eventflag) {
+	if (!m_cli) {
+		return -1;
+	}
+
+	if (eventflag & CHANGE_EVENT) {
+		m_cli->watchData(this);
+	}
+
+	if (eventflag & CHILD_EVENT) {
+		m_cli->watchChildren(this);
+	}
+
+	if (eventflag & CREATE_EVENT || eventflag & DELETE_EVENT) {
+		m_cli->watchExists(this);
+	}
+
+	m_event_mask |= eventflag;
+
+	return 0;
+}
+
+int Watcher::handleEvent(int event) {
+	if (event & m_event_mask) {
+		addWatch(event);
+	}
+
+	switch (event) {
+	case DELETE_EVENT:
+		if (!(event & m_event_mask)) {
+			checkExists();
+		}
+		break;
+	case CREATE_EVENT:
+		if (!(event & m_event_mask)) {
+			nodeExists();
+		}
+		break;
+	}
+
+	return 0;
+}
+
+int Watcher::nodeExists() {
+	if (!m_cli) {
+		return -1;
+	}
+
+	if (m_event_mask & CHANGE_EVENT) {
+		m_cli->watchData(this);
+	}
+
+	if (m_event_mask & CHILD_EVENT) {
+		m_cli->watchChildren(this);
+	}
+
+	if (m_event_mask & CREATE_EVENT || m_event_mask & DELETE_EVENT) {
+		m_cli->watchExists(this);
+	}
+
+	m_check_exists = false;
+
+	return 0;
+}
+
+
+void ZkClient::watcherFnG(zhandle_t * zh, int type, int state,
+	const char *path, void *watcherCtx) {
+
+	stringstream os;
+
+	if (type == ZOO_SESSION_EVENT) {
+		ZkClient* c = (ZkClient*)watcherCtx;
+		if (c->m_log) {
+			os << "ZkClient::watcherFnG path:" << path << ", type:"
+				<< type << ", state:" << state;
+			c->m_log(os.str());
+		}
+		c->connectingFinish();
+		if (state != ZOO_EXPIRED_SESSION_STATE) {
+			return;
+		}
+		//should reinit
+		c->reinit();
+		if (!c->m_log) {
+			return;
+		}
+		os << "ZkClient::watcherFnG reinit path:"
+			<< path
+			<< ", type:" << type
+			<< ", state:" << state;
+		c->m_log(os.str());
+		return;
+	}
+
+	WatchCtx* ctx = (WatchCtx*)watcherCtx;
+	CtxAutoDeletor d(ctx);
+	ZkClient* p = (ZkClient*)ctx->cli;
+
+	if (p->m_log) {
+		os << "ZkClient::watcherFnG path:" << path << ", type:"
+			<< type << ", state:" << state;
+		p->m_log(os.str());
+	}
+
+	Watcher* w = (Watcher*)p->getWatcher(ctx->watcher_id);
+
+	//watcher has been deleted
+	if (!w) {
+		return;
+	}
+
+	if (type == ZOO_CHILD_EVENT) {
+		w->handleEvent(Watcher::CHILD_EVENT);
+
+	}
+	else if (type == ZOO_CHANGED_EVENT) {
+		w->handleEvent(Watcher::CHANGE_EVENT);
+
+	}
+	else if (type == ZOO_DELETED_EVENT) {
+		w->handleEvent(Watcher::DELETE_EVENT);
+
+	}
+	else if (type == ZOO_CREATED_EVENT) {
+		w->handleEvent(Watcher::CREATE_EVENT);
+
+	}
+
+}
+
+void ZkClient::getChildrenComplete(int rc, const String_vector* s_v,
+	const void* data) {
+
+	WatchCtx* ctx = (WatchCtx*)data;
+	CtxAutoDeletor d(ctx);
+	ZkClient* p = (ZkClient*)ctx->cli;
+	stringstream os;
+
+	if (p->m_log) {
+		os << "ZkClient::getChildrenComplete rc:" << rc
+			<< ", id:" << ctx->watcher_id;
+		p->m_log(os.str());
+	}
+
+	Watcher* w = (Watcher*)p->getWatcher(ctx->watcher_id);
+
+	if (!w) {
+		std::cout << "getWatcher empty id:" << ctx->watcher_id << std::endl;
+		return;
+	}
+
+	if (rc == ZNONODE) {
+		w->checkExists();
+		return;
+
+	}
+
+	if (ZOK != rc) {
+		return;
+	}
+
+	urls us;
+
+	for (int i = 0; i < s_v->count; ++i) {
+		if (p->m_log)
+			os << s_v->data[i] << ",";
+		us.push_back(s_v->data[i]);
+	}
+
+	w->onChildrenChange(us);
+
+}
+
+
+void ZkClient::getDataComplete(int rc, const char *value, int value_len,
+	const struct Stat *stat, const void *data) {
+
+	WatchCtx* ctx = (WatchCtx*)data;
+	CtxAutoDeletor d(ctx);
+	ZkClient* p = (ZkClient*)ctx->cli;
+	stringstream os;
+
+	if (p->m_log) {
+		os << "ZkClient::getDataComplete rc:" << rc
+			<< ", id:" << ctx->watcher_id;
+		p->m_log(os.str());
+	}
+
+	Watcher* w = (Watcher*)p->getWatcher(ctx->watcher_id);
+
+	if (!w) {
+		return;
+	}
+
+	if (rc == ZNONODE) {
+		w->checkExists();
+		return;
+	}
+
+	if (ZOK != rc) {
+		return;
+	}
+
+	w->onDataChange(string(value, value_len));
+
+}
+
+
+void ZkClient::getExistsComplete(int rc, const struct Stat *stat,
+	const void *data) {
+
+	if (!data) {
+		return;
+	}
+
+	WatchCtx* ctx = (WatchCtx*)data;
+	CtxAutoDeletor d(ctx);
+	ZkClient* p = (ZkClient*)ctx->cli;
+	stringstream os;
+
+	if (p->m_log) {
+		os << "ZkClient::getDataComplete rc:" << rc
+			<< ", id:" << ctx->watcher_id;
+		p->m_log(os.str());
+	}
+
+	Watcher* w = (Watcher*)p->getWatcher(ctx->watcher_id);
+
+	if (!w) {
+		return;
+	}
+
+	if (rc == ZOK) {
+		w->onPathCreate();
+	}
+	else if (rc == ZNONODE) {
+		w->onPathRemove();
+	}
+}
+
+
+ZkClient::ZkClient()
+	:m_timeout_ms(DEFAULT_TIMEOUT),
+	m_zkhandle(NULL),
+	m_log(NULL) {
+	pthread_mutex_init(&m_cs, NULL);
+	pthread_cond_init(&m_cond, NULL);
+}
+
+ZkClient::~ZkClient() {
+	clear();
+}
+
+
+int ZkClient::createEphemeralNode(const string& path,
+	const string& data) {
+	int ret = 0;
+	ret = zoo_create(m_zkhandle, path.data(), data.data(),
+		data.size(),
+		&ZOO_OPEN_ACL_UNSAFE, ZOO_EPHEMERAL, NULL, 0);
+	if (ret) {
+		if (m_log) {
+			stringstream os;
+			os << "ZkClient::createEphemeralNode path:"
+				<< path << " fail, error:"
+				<< zerror(ret);
+			m_log(os.str());
+		}
+		return -1;
+	}
+	return ret;
+}
+
+int ZkClient::createPersistentNode(const string& path,
+	const string& data) {
+	int ret = 0;
+	ret = zoo_create(m_zkhandle, path.data(), data.data(),data.size(),&ZOO_OPEN_ACL_UNSAFE, 0, NULL, 0);
+	if (!ret) {
+		return 0;
+	}
+	if (m_log) {
+		stringstream os;
+		os << "ZkClient::createPersistentNode path:"
+			<< path << " fail, error:"
+			<< zerror(ret);
+		m_log(os.str());
+	}
+	return -1;
+}
+
+
+int ZkClient::deleteNode(const string& path) {
+	int ret = 0;
+	ret = zoo_delete(m_zkhandle, path.data(), -1);
+	if (!ret) {
+		return 0;
+	}
+	if (m_log) {
+		stringstream os;
+		os << "ZkClient::createPersistentNode path:"
+			<< path << " fail, error:"
+			<< zerror(ret);
+		m_log(os.str());
+	}
+	return -1;
+}
+
+int ZkClient::setNodeData(const string& path, const string& data) {
+	int ret = 0;
+	ret = zoo_set(m_zkhandle, path.data(), data.data(), data.size(), 0);
+	if (!ret) {
+		return 0;
+	}
+	if (m_log) {
+		stringstream os;
+		os << "ZkClient::setNodeData path:"
+			<< path << " fail, error:"
+			<< zerror(ret);
+		m_log(os.str());
+	}
+	return -1;
+}
+
+
+int ZkClient::getNodeData(const string& path, string& data) {
+	int ret = 0;
+	struct Stat s;
+	data.resize(1024 * 1000);
+	char* buf = (char*)data.data();
+	int buflen = data.size();
+	ret = zoo_get(m_zkhandle, path.data(), 0, buf, &buflen, &s);
+	if (!ret) {
+		data.resize(buflen);
+		return 0;
+	}
+	if (m_log) {
+		stringstream os;
+		os << "ZkClient::setNodeData path:"
+			<< path << " fail, error:"
+			<< zerror(ret);
+		m_log(os.str());
+	}
+	return -1;
+}
+
+
+void ZkClient::setLogCB(ZkLogCallBack l) {
+	m_log = l;
+}
+
+int ZkClient::init(const string& zkurl,
+	int timout_ms) {
+	m_zkurl = zkurl;
+	m_timeout_ms = timout_ms;
+	return doInit();
+}
+
+int ZkClient::reinit() {
+	int ret = 0;
+	if (m_zkhandle) {
+		zookeeper_close(m_zkhandle);
+		m_zkhandle = NULL;
+	}
+	ret = doInit();
+	if (ret < 0)
+		return ret;
+	pthread_mutex_lock(&m_cs);
+	watcherset::iterator it = m_watchers.begin();
+	for (; it != m_watchers.end(); ++it) {
+		Watcher* w = it->second;
+		w->nodeExists();
+	}
+	pthread_mutex_unlock(&m_cs);
+	return 0;
+}
+
+int ZkClient::watchData(Watcher* w) {
+	WatchCtx* ctx = new WatchCtx(this, w->getID());
+	WatchCtx* ctx1 = new WatchCtx(this, w->getID());
+	int ret = zoo_awget(m_zkhandle, w->getPath().data(),
+		ZkClient::watcherFnG, ctx,
+		getDataComplete, ctx1);
+	std::cout << "watchData: path:" << w->getPath() << " id:" << w->getID()
+		<< ", ret:" << ret << std::endl;
+	return ret;
+
+}
+
+int ZkClient::watchChildren(Watcher* w) {
+	WatchCtx* ctx = new WatchCtx(this, w->getID());
+	WatchCtx* ctx1 = new WatchCtx(this, w->getID());
+	int ret = zoo_awget_children(m_zkhandle, w->getPath().data(),
+		ZkClient::watcherFnG, ctx,
+		getChildrenComplete, ctx1);
+	std::cout << "watchChildren: path:" << w->getPath() << " id:" << w->getID()
+		<< ", ret:" << ret << std::endl;
+	return ret;
+
+}
+
+int ZkClient::watchExists(Watcher* w) {
+	WatchCtx* ctx = new WatchCtx(this, w->getID());
+	WatchCtx* ctx1 = new WatchCtx(this, w->getID());
+	std::cout << "watchExists: id:" << w->getID() << std::endl;
+	int ret = zoo_awexists(m_zkhandle, w->getPath().data(),
+		ZkClient::watcherFnG, ctx,
+		getExistsComplete, ctx1);
+	std::cout << "watchExists: path:" << w->getPath() << " id:" << w->getID()
+		<< ", ret:" << ret << std::endl;
+	return ret;
+
+}
+
+int ZkClient::watchCreate(Watcher* w) {
+	WatchCtx* ctx = new WatchCtx(this, w->getID());
+	std::cout << "watchExists: id:" << w->getID() << std::endl;
+	int ret = zoo_awexists(m_zkhandle, w->getPath().data(),
+		ZkClient::watcherFnG, ctx,
+		getExistsComplete, NULL);
+	std::cout << "watchExists: path:" << w->getPath() << " id:" << w->getID()
+		<< ", ret:" << ret << std::endl;
+	return ret;
+
+}
+
+
+int ZkClient::doInit() {
+	int ret = 0;
+	m_zkhandle = zookeeper_init(m_zkurl.data(),
+		ZkClient::watcherFnG, m_timeout_ms, NULL, this, 0);
+	waitConnectingFinish();
+	if (zoo_state(m_zkhandle) != ZOO_CONNECTED_STATE) {
+		zookeeper_close(m_zkhandle);
+		m_zkhandle = NULL;
+		ret = -1;
+	}
+	return ret;
+}
+
+int ZkClient::connectingFinish() {
+	pthread_mutex_lock(&m_cs);
+	pthread_cond_signal(&m_cond);
+	pthread_mutex_unlock(&m_cs);
+	return 0;
+}
+
+int ZkClient::waitConnectingFinish() {
+	pthread_mutex_lock(&m_cs);
+	pthread_cond_wait(&m_cond, &m_cs);
+	pthread_mutex_unlock(&m_cs);
+	return 0;
+}
+
+int ZkClient::clear() {
+	//clear watcher is job of who create it
+	//clearPathWatchers();
+	if (m_zkhandle) {
+		zookeeper_close(m_zkhandle);
+		m_zkhandle = NULL;
+	}
+	pthread_mutex_destroy(&m_cs);
+	pthread_cond_destroy(&m_cond);
+	return 0;
+}
+
+int ZkClient::addWatcher(Watcher* w) {
+	pthread_mutex_lock(&m_cs);
+	std::cout << "addWatcher id:" << w->getID() << std::endl;
+	m_watchers[w->getID()] = w;
+
+	return 0;
+}
+
+int ZkClient::delWatcher(Watcher* w) {
+	pthread_mutex_lock(&m_cs);
+	std::cout << "delWatcher id:" << w->getID() << std::endl;
+	m_watchers.erase(w->getID());
+
+	return 0;
+}
+
+
+Watcher* ZkClient::getWatcher(int id) {
+	pthread_mutex_lock(&m_cs);
+
+	watcherset::iterator itor = m_watchers.find(id);
+
+	if (itor == m_watchers.end()) {
+		return NULL;
+	}
+
+	return itor->second;
+}
+
+
+int ZkClient::getChildren(const string& path, s_vector& us) {
+	int ret = 0;
+	struct String_vector s_v;
+	stringstream os;
+	ret = zoo_get_children(m_zkhandle, path.data(),
+		0, &s_v);
+	if (ret) {
+		if (m_log) {
+			os << "ZkClient::getChildren fail, path:"
+				<< path << ", error:" << zerror(ret);
+			m_log(os.str());
+		}
+		return -1;
+	}
+	if (m_log) {
+		os << "ZkClient::getChildren, path:"
+			<< path << ", children:[";
+	}
+	for (int i = 0; i < s_v.count; ++i) {
+		if (m_log)
+			os << s_v.data[i] << ",";
+		us.push_back(s_v.data[i]);
+	}
+	if (m_log) {
+		os << "]";
+		m_log(os.str());
+	}
+	deallocate_String_vector(&s_v);
+	return 0;
+}

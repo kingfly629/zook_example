@@ -1,0 +1,81 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<ClassDiagram MajorVersion="1" MinorVersion="1">
+  <Class Name="TWatcher" Collapsed="true">
+    <Position X="0.5" Y="1.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAgAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\main.cpp</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="Base" Collapsed="true">
+    <Position X="3.25" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAEAAAAAAQAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\Base.h</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="Derive" Collapsed="true">
+    <Position X="3.25" Y="1.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAQAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\Derive.h</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="Watcher" Collapsed="true">
+    <Position X="0.5" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>gMAABCAAAEBAAhCACJFAAIMgAAACDAQAAAAAAAgABAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\zk_client.h</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Class Name="ZkClient" Collapsed="true">
+    <Position X="6" Y="0.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AEDiAAANIAAAAEAIREBYDFAAAAApAQIAQEACABAgAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\zk_client.h</FileName>
+    </TypeIdentifier>
+  </Class>
+  <Struct Name="A" Collapsed="true">
+    <Position X="6" Y="1.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAACgAQAAAAAAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\main.cpp</FileName>
+    </TypeIdentifier>
+  </Struct>
+  <Typedef Name="map_int_string" Collapsed="true">
+    <Position X="6" Y="3" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\main.cpp</FileName>
+    </TypeIdentifier>
+  </Typedef>
+  <Typedef Name="urls" Collapsed="true">
+    <Position X="1.5" Y="6.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\zk_client.cpp</FileName>
+    </TypeIdentifier>
+  </Typedef>
+  <Typedef Name="s_vector" Collapsed="true">
+    <Position X="1.5" Y="4.5" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\zk_client.h</FileName>
+    </TypeIdentifier>
+  </Typedef>
+  <Typedef Name="zhandle_t" Collapsed="true">
+    <Position X="7.75" Y="3" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\zk_client.h</FileName>
+    </TypeIdentifier>
+  </Typedef>
+  <Typedef Name="ZkLogCallBack" Collapsed="true">
+    <Position X="6" Y="3.75" Width="1.5" />
+    <TypeIdentifier>
+      <HashCode>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</HashCode>
+      <FileName>C:\Users\uj6\Source\Repos\ConsoleApplication2\ConsoleApplication2\zk_client.h</FileName>
+    </TypeIdentifier>
+  </Typedef>
+  <Font Name="微软雅黑" Size="9" />
+</ClassDiagram>

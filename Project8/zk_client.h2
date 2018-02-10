@@ -1,0 +1,184 @@
+#ifndef ZK_CLIENT_H
+#define ZK_CLIENT_H
+
+#include <sstream>
+#include <iostream>
+#include <algorithm>
+#include <map>
+#include <string>
+#include <vector>
+#include <pthread.h>
+#include <zookeeper/zookeeper.h>
+#include <pthread.h>
+
+typedef std::vector<std::string> s_vector;
+typedef struct _zhandle zhandle_t;
+typedef void (*ZkLogCallBack)(const std::string& l);
+
+class ZkClient;
+
+class Watcher {
+public:
+	enum {
+		CREATE_EVENT = 1,
+		DELETE_EVENT = 2,
+		CHANGE_EVENT = 4,
+		CHILD_EVENT = 8,
+		ALL_EVENT = 0XFFFFFFFF,
+	};
+
+	Watcher(const std::string& path = "");
+
+	void setPath(const std::string& path) {
+		m_path = path;
+	}
+
+	//when destroy, auto stop watch
+	virtual ~Watcher();
+
+	int getID() const {
+		return m_id;
+	}
+
+	int addToClient(ZkClient* cli);
+	int delFromClient();
+
+	int addWatch(int eventflag);
+
+	int delWatch(int eventflag);
+
+	int getWatchEventMask() const {
+		return m_event_mask;
+	}
+
+	int handleEvent(int event);
+	int checkExists();
+	int nodeExists();
+
+	const std::string& getPath() const {
+		return m_path;
+	}
+
+	virtual int onPathRemove() {
+		return 0;
+	}
+
+	virtual int onPathCreate() {
+		return 0;
+	}
+
+	virtual int onChildrenChange(const s_vector& children) {
+		return 0;
+	}
+	virtual int onDataChange(const std::string& data) {
+		return 0;
+	}
+
+protected:
+
+	int setClient(ZkClient* cli);
+
+	ZkClient* getClient() {
+		return m_cli;
+	}
+
+	ZkClient* m_cli;
+	std::string m_path;
+	int m_id;
+	int m_event_mask;
+	bool m_check_exists;
+	static volatile int s_id;
+};
+
+class ZkClient {
+public:
+	enum {
+		STATUS_OK = 0,
+		STATUS_NOT_INIT = -10,
+	};
+
+	enum {
+		DEFAULT_TIMEOUT = 30000,
+	};
+
+	ZkClient();
+	~ZkClient();
+
+	int init(const std::string& zkurl,
+		int timout_ms = DEFAULT_TIMEOUT);
+
+	int clear();
+
+	int createEphemeralNode(const std::string& path,
+		const std::string& data);
+	int createPersistentNode(const std::string& path,
+		const std::string& data);
+	int deleteNode(const std::string& path);
+	int setNodeData(const std::string& path,
+		const std::string& data);
+	//no watch
+	int getNodeData(const std::string& path, std::string& data);
+	//no watch
+	int getChildren(const std::string& path, s_vector& us);
+
+	void setLogCB(ZkLogCallBack l);
+private:
+
+	struct WatchCtx {
+		WatchCtx(ZkClient* c, int i)
+			:cli(c), watcher_id(i) {}
+		ZkClient* cli;
+		int watcher_id;
+	};
+
+	class CtxAutoDeletor {
+	public:
+		CtxAutoDeletor(WatchCtx* ctx) :m_ctx(ctx) {
+		}
+
+		~CtxAutoDeletor() {
+			if (m_ctx)
+				delete m_ctx;
+		}
+
+	private:
+		WatchCtx* m_ctx;
+	};
+
+	int doInit();
+	int reinit();
+	int connectingFinish();
+	int waitConnectingFinish();
+
+	static void watcherFnG(zhandle_t * zh, int type, int state,
+		const char *path, void *watcherCtx);
+
+	static void getChildrenComplete(int rc, const String_vector* s_v,
+		const void* data);
+	static void getDataComplete(int rc, const char *value, int value_len,
+		const struct Stat *stat, const void *data);
+	static void getExistsComplete(int rc, const struct Stat *stat,
+		const void *data);
+
+	int addWatcher(Watcher* w);
+	int delWatcher(Watcher* w);
+	Watcher* getWatcher(int id);
+
+	int watchData(Watcher* w);
+	int watchChildren(Watcher* w);
+	int watchExists(Watcher* w);
+	int watchCreate(Watcher* w);
+
+	friend class Watcher;
+
+	typedef std::map<int, Watcher*> watcherset;
+	std::string m_zkurl;
+	int m_timeout_ms;
+	zhandle_t* m_zkhandle;
+	pthread_mutex_t m_cs;
+	pthread_cond_t m_cond;
+	watcherset m_watchers;
+	ZkLogCallBack m_log;
+};
+
+#endif
